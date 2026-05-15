@@ -25,22 +25,26 @@ function getSetCookies(r: Response): string[] {
   return single ? [single] : [];
 }
 
+function requestPath(req: VercelRequest): string {
+  const raw = req.url ?? "/";
+  const pathOnly = raw.split("?")[0] ?? "/";
+  if (pathOnly.startsWith("/api")) return pathOnly;
+  return `/api${pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`}`;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const backend = backendBase();
   if (!backend) {
     res.status(500).json({
       error:
-        "На Vercel не задан BACKEND_URL (URL вашего API, например http://1.2.3.4:3001)",
+        "На Vercel не задан BACKEND_URL (например http://1.2.3.4:9000)",
     });
     return;
   }
 
-  const host = (req.headers.host as string) || "localhost";
-  const href = req.url?.startsWith("http") ? req.url : `http://${host}${req.url || "/"}`;
-  const url = new URL(href);
-  const sub = url.pathname.replace(/^\/api(\/|$)/, "");
-  const pathOnBackend = sub ? `/api/${sub}` : "/api";
-  const target = `${backend}${pathOnBackend}${url.search}`;
+  const apiPath = requestPath(req);
+  const q = req.url?.includes("?") ? `?${req.url.split("?")[1]}` : "";
+  const target = `${backend}${apiPath}${q}`;
 
   const headers = new Headers();
   for (const [key, val] of Object.entries(req.headers)) {
@@ -49,6 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (HOP_BY_HOP.has(lower)) continue;
     headers.set(key, Array.isArray(val) ? val.join(", ") : val);
   }
+  const host = (req.headers.host as string) || "localhost";
   headers.set("x-forwarded-host", host);
   headers.set("x-forwarded-proto", "https");
 
