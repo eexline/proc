@@ -15,7 +15,6 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
-    "@vercel/node": "^3.2.29",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "cross-env": "^7.0.3",

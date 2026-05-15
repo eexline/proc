@@ -2,12 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": {
-    "api/**/*.ts": {
-      "maxDuration": 60
-    }
-  },
   "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "http://2.71.120.71:9000/api/:path*"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html",

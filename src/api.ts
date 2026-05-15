@@ -8,13 +8,8 @@ import type {
   UserRole,
 } from "./types";
 
-/** Пусто в dev (прокси Vite). На Vercel: VITE_API_BASE_URL=https://api.ваш-домен.ru */
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
-
-function apiPath(path: string): string {
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return API_BASE ? `${API_BASE}${p}` : p;
-}
+/** Same-origin: dev → Vite proxy, prod → vercel.json rewrites */
+const base = "";
 
 function notifySessionLost(res: Response, url: string) {
   if (res.status !== 401) return;
@@ -39,7 +34,8 @@ async function parseJson<T>(res: Response, url: string): Promise<T> {
 }
 
 async function req<T>(input: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(apiPath(input), {
+  const path = input.startsWith("/") ? input : `/${input}`;
+  const res = await fetch(`${base}${path}`, {
     ...init,
     credentials: "include",
     headers: {
