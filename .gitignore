@@ -3,5 +3,7 @@ dist
 data/*.db
 data/*.db-journal
 server/data/
+server/node_modules/
+server/.env
 .env
 *.local
