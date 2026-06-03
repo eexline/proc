@@ -27,3 +27,17 @@ export function formatBalanceArs(s: string | null | undefined): string | null {
 export function formatBalanceArsDash(s: string | null | undefined): string {
   return formatBalanceArs(s) ?? "—";
 }
+
+/** Сумма балансов (только заданные, пустые не входят). */
+export function sumBalancesArs(balances: Iterable<string | null | undefined>): bigint {
+  let total = 0n;
+  for (const b of balances) {
+    const n = canonicalBalanceArs(b);
+    if (n) total += BigInt(n);
+  }
+  return total;
+}
+
+export function formatBigIntBalanceArs(n: bigint): string {
+  return formatBalanceArs(n.toString()) ?? "—";
+}

@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { api } from "../api";
 import type { Account, AccountStatus, Platform } from "../types";
-import { STATUS_LABELS, STATUS_ORDER } from "../types";
+import { STATUS_LABELS, STATUS_ORDER, statusLabel } from "../types";
 import { ACCOUNT_COMMENT_MAX_LEN } from "../../shared/accountLimits";
 import {
   formatSqliteUtcAsRuDateTimeAuditStrip,
@@ -14,8 +14,10 @@ import {
   balancesArsEqual,
   canonicalBalanceArs,
   formatBalanceArsDash,
+  formatBigIntBalanceArs,
   stripBalanceToDigits,
 } from "../lib/balanceArs";
+import { writeTextToClipboard } from "../lib/clipboard";
 
 function dash(s: string | null | undefined) {
   const t = (s ?? "").trim();
@@ -69,14 +71,6 @@ function CaptionGhost() {
       className="lk-caption-slot lk-caption-slot--ghost lk-audit-placeholder"
       aria-hidden="true"
     />
-  );
-}
-
-function StatusNeonIcon() {
-  return (
-    <svg className="status-neon-svg" viewBox="0 0 24 24" aria-hidden>
-      <circle cx="12" cy="12" r="5" fill="currentColor" />
-    </svg>
   );
 }
 
@@ -240,7 +234,8 @@ function StatusPickerModal({
                     type="button"
                     className={`status-modal-option status-modal-option--${s}${s === currentStatus ? " status-modal-option--current" : ""}`}
                     onClick={() => {
-                      if (s === "working" || s === "blocked") void pickSimple(s);
+                      if (s === "working" || s === "blocked" || s === "reserve")
+                        void pickSimple(s);
                       else openExtra(s);
                     }}
                   >
@@ -388,23 +383,7 @@ function AccountEditRow({
   async function copyFioToClipboard() {
     const text = accountRef.current.full_name.trim();
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      try {
-        const ta = document.createElement("textarea");
-        ta.value = text;
-        ta.style.position = "fixed";
-        ta.style.left = "-9999px";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-      } catch {
-        return;
-      }
-    }
-    onClipboardCopy(text);
+    if (await writeTextToClipboard(text)) onClipboardCopy(text);
   }
 
   useEffect(() => {
@@ -550,17 +529,14 @@ function AccountEditRow({
           <div className="lk-td-main">
             <button
               type="button"
-              className={`status-neon-trigger status-neon-trigger--${status}`}
+              className={`status-badge status-${status} status-badge-btn`}
               onClick={() => setStatusModalOpen(true)}
               aria-haspopup="dialog"
               aria-expanded={statusModalOpen}
               title="Сменить статус"
               disabled={saving}
             >
-              <span className="status-neon-icon-wrap">
-                <StatusNeonIcon />
-              </span>
-              <span className="status-neon-label">{STATUS_LABELS[status]}</span>
+              {statusLabel(status)}
             </button>
             {status === "transfer_limits" && transferLimitUntil.trim() && (
               <div className="user-lk-status-meta">
@@ -694,6 +670,15 @@ export function UserPage() {
     }, 3800);
   }, []);
 
+  const copyToClipboard = useCallback(
+    async (text: string) => {
+      const t = text.trim();
+      if (!t) return;
+      if (await writeTextToClipboard(t)) showClipboardToast(t);
+    },
+    [showClipboardToast]
+  );
+
   useEffect(() => {
     return () => window.clearTimeout(clipboardToastHideRef.current);
   }, []);
@@ -735,7 +720,7 @@ export function UserPage() {
     let cancelled = false;
     (async () => {
       try {
-        const list = await api.accounts(platformId, filter);
+        const list = await api.accounts(platformId, "all");
         if (!cancelled) setAccounts(list);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Ошибка");
@@ -744,30 +729,67 @@ export function UserPage() {
     return () => {
       cancelled = true;
     };
-  }, [platformId, filter]);
-
-  const currentPlatform =
-    platformId === "all" ? undefined : platforms.find((p) => p.id === platformId);
+  }, [platformId]);
 
   const reloadAccounts = useCallback(async () => {
     if (!platformId) return;
     try {
-      const list = await api.accounts(platformId, filter);
+      const list = await api.accounts(platformId, "all");
       setAccounts(list);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
     }
-  }, [platformId, filter]);
+  }, [platformId]);
+
+  const accountsByStatus = useMemo(() => {
+    if (filter === "all") return accounts;
+    return accounts.filter((a) => a.status === filter);
+  }, [accounts, filter]);
 
   const filteredAccounts = useMemo(() => {
     const q = fioSearch.trim().toLowerCase();
-    if (!q) return accounts;
-    return accounts.filter((a) => (a.full_name ?? "").toLowerCase().includes(q));
-  }, [accounts, fioSearch]);
+    if (!q) return accountsByStatus;
+    return accountsByStatus.filter((a) =>
+      (a.full_name ?? "").toLowerCase().includes(q)
+    );
+  }, [accountsByStatus, fioSearch]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: accounts.length };
+    for (const s of STATUS_ORDER) counts[s] = 0;
+    for (const a of accounts) {
+      if (STATUS_ORDER.includes(a.status)) counts[a.status] += 1;
+    }
+    return counts;
+  }, [accounts]);
+
+  const platformBalanceTotals = useMemo(() => {
+    if (platformId === "all" || !platformId) return null;
+    const byStatus = Object.fromEntries(
+      STATUS_ORDER.map((s) => [s, { count: 0, sum: 0n }])
+    ) as Record<AccountStatus, { count: number; sum: bigint }>;
+    let total = 0n;
+    for (const a of accounts) {
+      if (!STATUS_ORDER.includes(a.status)) continue;
+      byStatus[a.status].count += 1;
+      const digits = canonicalBalanceArs(a.balance);
+      if (digits) {
+        const part = BigInt(digits);
+        byStatus[a.status].sum += part;
+        total += part;
+      }
+    }
+    return { byStatus, total };
+  }, [accounts, platformId]);
+
+  const selectedPlatformName =
+    platformId && platformId !== "all"
+      ? platforms.find((p) => p.id === platformId)?.name
+      : undefined;
 
   return (
     <>
-      <main>
+      <main className="page-main">
       {error && <div className="alert alert-error">{error}</div>}
 
       {loading ? (
@@ -790,25 +812,11 @@ export function UserPage() {
           )}
         </div>
       ) : (
-        <>
-          <div className="card user-lk-filters-card">
-            <div className="card-header user-lk-filters-card__head">
-              <div>
-                <p className="card-title">Фильтры</p>
-                <h2 className="card-heading">Площадка и статус</h2>
-              </div>
-              {(platformId === "all" || currentPlatform) && (
-                <span className="stat-chip user-lk-filters-card__chip">
-                  Сейчас:{" "}
-                  <span className="user-lk-filters-card__current-name">
-                    {platformId === "all" ? "Все площадки" : currentPlatform?.name}
-                  </span>
-                </span>
-              )}
-            </div>
-            <div className="toolbar user-lk-filters-toolbar">
+        <div className="card lk-workspace">
+          <div className="lk-workspace__bar">
+            <div className="lk-workspace__toolbar lk-workspace__toolbar--3">
               <div className="field">
-                <label htmlFor="pl">Площадка</label>
+                <label htmlFor="pl">Площадка / Отдельные банки</label>
                 <select
                   id="pl"
                   value={platformId}
@@ -843,7 +851,7 @@ export function UserPage() {
                   ))}
                 </select>
               </div>
-              <div className="field user-lk-filters-toolbar__fio">
+              <div className="field">
                 <label htmlFor="lk-fio-search">Поиск по ФИО</label>
                 <input
                   id="lk-fio-search"
@@ -859,36 +867,55 @@ export function UserPage() {
             </div>
           </div>
 
-          <div className="card">
-            <div className="card-header">
-              <div>
-                <p className="card-title">Таблица</p>
-                <h2 className="card-heading">Список личных кабинетов</h2>
-              </div>
-              <span className="stat-chip">
-                {fioSearch.trim() ? (
-                  <>
-                    Показано: <strong>{filteredAccounts.length}</strong> из {accounts.length}
-                  </>
-                ) : (
-                  <>
-                    Записей: <strong>{accounts.length}</strong>
-                  </>
-                )}
-              </span>
+          <div className="filter-chips" role="group" aria-label="Фильтр по статусу">
+            <div className="filter-chips__scroll">
+              <button
+                type="button"
+                className={`filter-chip ${filter === "all" ? "filter-chip--active" : ""}`}
+                onClick={() => setFilter("all")}
+              >
+                Все <span className="filter-chip__n">{statusCounts.all}</span>
+              </button>
+              {STATUS_ORDER.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  className={`filter-chip filter-chip--${s} ${filter === s ? "filter-chip--active" : ""}`}
+                  onClick={() => setFilter(s)}
+                >
+                  {STATUS_LABELS[s]}{" "}
+                  <span className="filter-chip__n">{statusCounts[s] ?? 0}</span>
+                </button>
+              ))}
             </div>
+            <span className="stat-chip filter-chips__stat" aria-live="polite">
+              {fioSearch.trim() ? (
+                <>
+                  Показано: <strong>{filteredAccounts.length}</strong> из {accountsByStatus.length}
+                </>
+              ) : filter !== "all" ? (
+                <>
+                  По фильтру: <strong>{accountsByStatus.length}</strong> из {accounts.length}
+                </>
+              ) : (
+                <>
+                  Записей: <strong>{accounts.length}</strong>
+                </>
+              )}
+            </span>
+          </div>
 
-            {accounts.length === 0 ? (
-              <p className="empty" style={{ paddingTop: "0.5rem" }}>
-                Нет записей по выбранному фильтру.
-              </p>
-            ) : filteredAccounts.length === 0 ? (
-              <p className="empty" style={{ paddingTop: "0.5rem" }}>
-                Нет записей, подходящих под поиск по ФИО.
-              </p>
-            ) : (
-              <div className="table-wrap">
-<table
+          <div className="lk-workspace__table-head">
+            <h2 className="lk-workspace__table-title">Личные кабинеты</h2>
+          </div>
+
+          {accounts.length === 0 ? (
+            <p className="empty">Нет записей по выбранному фильтру.</p>
+          ) : filteredAccounts.length === 0 ? (
+            <p className="empty">Нет записей, подходящих под поиск по ФИО.</p>
+          ) : (
+            <div className="table-wrap table-wrap--inset">
+              <table
                   className={
                     platformId === "all"
                       ? "user-lk-table user-lk-table--all-platforms"
@@ -916,11 +943,63 @@ export function UserPage() {
                       />
                     ))}
                   </tbody>
-                </table>
+              </table>
+            </div>
+          )}
+
+          {platformBalanceTotals && accounts.length > 0 && (
+            <section
+              className="lk-balance-footer"
+              aria-label={`Суммы балансов: ${selectedPlatformName ?? "площадка"}`}
+            >
+              <header className="lk-balance-footer__head">
+                <div>
+                  <h3 className="lk-balance-footer__title">Балансы на площадке</h3>
+                  {selectedPlatformName ? (
+                    <p className="lk-balance-footer__platform">{selectedPlatformName}</p>
+                  ) : null}
+                </div>
+                <p className="lk-balance-footer__hint">Нажмите на карточку — сумма скопируется</p>
+              </header>
+              <div className="lk-balance-footer__grid" role="list">
+                {STATUS_ORDER.map((s) => {
+                  const row = platformBalanceTotals.byStatus[s];
+                  if (row.count === 0) return null;
+                  const amountText = formatBigIntBalanceArs(row.sum);
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      role="listitem"
+                      className={`lk-balance-card lk-balance-card--${s}`}
+                      title={`Скопировать: ${amountText}`}
+                      onClick={() => void copyToClipboard(amountText)}
+                    >
+                      <span className={`lk-balance-card__badge status-badge status-${s}`}>
+                        {STATUS_LABELS[s]}
+                      </span>
+                      <span className="lk-balance-card__amount mono">{amountText}</span>
+                      <span className="lk-balance-card__meta">{row.count} ЛК</span>
+                    </button>
+                  );
+                })}
               </div>
-            )}
-          </div>
-        </>
+              <button
+                type="button"
+                className="lk-balance-footer__total"
+                title={`Скопировать итого: ${formatBigIntBalanceArs(platformBalanceTotals.total)}`}
+                onClick={() =>
+                  void copyToClipboard(formatBigIntBalanceArs(platformBalanceTotals.total))
+                }
+              >
+                <span className="lk-balance-footer__total-label">Итого на площадке</span>
+                <span className="lk-balance-footer__total-amount mono">
+                  {formatBigIntBalanceArs(platformBalanceTotals.total)}
+                </span>
+              </button>
+            </section>
+          )}
+        </div>
       )}
     </main>
     {clipboardToast &&

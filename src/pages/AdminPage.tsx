@@ -57,6 +57,9 @@ export function AdminPage() {
   const [comment, setComment] = useState("");
   const [balance, setBalance] = useState("");
   const [busy, setBusy] = useState(false);
+  const [digestBusy, setDigestBusy] = useState(false);
+  const [digestNotice, setDigestNotice] = useState<string | null>(null);
+  const [digestSlot, setDigestSlot] = useState<"auto" | "morning" | "evening">("auto");
 
   const [editAccountId, setEditAccountId] = useState<string | null>(null);
   const [editStatus, setEditStatus] = useState<AccountStatus>("working");
@@ -300,8 +303,11 @@ export function AdminPage() {
       return;
     }
     if (editStatus === "needs_repair" && !editComment.trim()) {
-      setEditModalErr("Для «Нужна починка» укажите комментарий");
-      return;
+      const orig = accounts.find((a) => a.id === editAccountId);
+      if (orig?.status !== "needs_repair") {
+        setEditModalErr("Для «Нужна починка» укажите комментарий");
+        return;
+      }
     }
     if (editStatus === "transfer_limits") {
       const t = editTransferLimitUntil.trim();
@@ -344,6 +350,22 @@ export function AdminPage() {
     }
   }
 
+  async function onSendDigest() {
+    setDigestNotice(null);
+    setPageError(null);
+    setDigestBusy(true);
+    try {
+      const slot = digestSlot === "auto" ? undefined : digestSlot;
+      const r = await api.sendDigest(slot);
+      const label = r.slot === "evening" ? "вечер" : "утро";
+      setDigestNotice(`Отчёт отправлен в Telegram (${label})`);
+    } catch (e) {
+      setPageError(e instanceof Error ? e.message : "Ошибка отправки отчёта");
+    } finally {
+      setDigestBusy(false);
+    }
+  }
+
   const tabs: AdminTab[] = ["accounts", "platforms", "users"];
 
   return (
@@ -355,8 +377,8 @@ export function AdminPage() {
         </div>
       )}
 
-      <div className="admin-tabs-wrap">
-        <div className="admin-tabs" role="tablist" aria-label="Админ">
+      <section className="admin-panel">
+        <nav className="admin-tabs" role="tablist" aria-label="Админ">
           {tabs.map((id) => (
             <button
               key={id}
@@ -379,14 +401,45 @@ export function AdminPage() {
               </span>
             </button>
           ))}
-        </div>
-      </div>
+        </nav>
 
-      <section
-        className="admin-workspace"
-        role="tabpanel"
-        aria-labelledby={`admin-tab-${tab}`}
-      >
+        <div className="admin-digest-bar">
+          <span className="admin-digest-bar__title">Отчёт в Telegram</span>
+          <select
+            id="digest-slot"
+            className="admin-digest-bar__select"
+            value={digestSlot}
+            disabled={digestBusy || busy}
+            aria-label="Тип отчёта"
+            onChange={(e) => {
+              setDigestSlot(e.target.value as "auto" | "morning" | "evening");
+              blurSelect(e.currentTarget);
+            }}
+          >
+            <option value="auto">Сейчас (утро/вечер)</option>
+            <option value="morning">Утро</option>
+            <option value="evening">Вечер</option>
+          </select>
+          <button
+            type="button"
+            className="btn btn-primary admin-digest-bar__btn"
+            disabled={digestBusy || busy}
+            onClick={() => void onSendDigest()}
+          >
+            {digestBusy ? "Отправка…" : "Отправить отчёт"}
+          </button>
+        </div>
+        {digestNotice && (
+          <p className="admin-digest-notice" role="status">
+            {digestNotice}
+          </p>
+        )}
+
+        <div
+          className="admin-panel-body"
+          role="tabpanel"
+          aria-labelledby={`admin-tab-${tab}`}
+        >
         {tab === "users" && (
           <>
             <section className="admin-section">
@@ -486,7 +539,7 @@ export function AdminPage() {
         )}
 
         {tab === "platforms" && (
-          <>
+          <div className="admin-platforms-split">
             <section className="admin-section">
               <h2 className="admin-section-title">Площадки</h2>
               <form className="admin-inline-add-form" onSubmit={onAddPlatform}>
@@ -566,7 +619,7 @@ export function AdminPage() {
                 </ul>
               )}
             </section>
-          </>
+          </div>
         )}
 
         {tab === "accounts" && (
@@ -576,10 +629,10 @@ export function AdminPage() {
             ) : (
               <>
                 <section className="admin-section">
-                  <h2 className="admin-section-title">Площадка</h2>
-                  <div className="admin-toolbar">
-                    <div className="field admin-toolbar__field">
-                      <label htmlFor="adm-pl">Выбор площадки</label>
+                  <h2 className="admin-section-title">Новый ЛК</h2>
+                  <div className="admin-lk-toolbar">
+                    <div className="field admin-lk-toolbar__platform">
+                      <label htmlFor="adm-pl">Площадка</label>
                       <select
                         id="adm-pl"
                         value={platformId}
@@ -599,12 +652,8 @@ export function AdminPage() {
                       ЛК: <strong>{accounts.length}</strong>
                     </span>
                   </div>
-                </section>
-
-                <section className="admin-section">
-                  <h2 className="admin-section-title">Новый ЛК</h2>
-                  <form className="admin-form-stack" onSubmit={onAddAccount}>
-                    <div className="row cols-2 admin-form-grid">
+                  <form className="admin-new-lk-form" onSubmit={onAddAccount}>
+                    <div className="admin-new-lk-grid">
                       <div className="field">
                         <label htmlFor="acc-status">Статус</label>
                         <select
@@ -680,12 +729,20 @@ export function AdminPage() {
                 </section>
 
                 <section className="admin-section">
-                  <h2 className="admin-section-title">Список</h2>
+                  <h2 className="admin-section-title">Список ЛК</h2>
                   {accounts.length === 0 ? (
                     <p className="empty admin-empty">Нет записей.</p>
                   ) : (
                     <div className="table-wrap admin-table-wrap">
                       <table className="admin-data-table admin-accounts-table">
+                        <colgroup>
+                          <col className="admin-accounts-col-status" />
+                          <col className="admin-accounts-col-name" />
+                          <col className="admin-accounts-col-bank" />
+                          <col className="admin-accounts-col-balance" />
+                          <col className="admin-accounts-col-comment" />
+                          <col className="admin-accounts-col-actions" />
+                        </colgroup>
                         <thead>
                           <tr>
                             <th>Статус</th>
@@ -693,50 +750,62 @@ export function AdminPage() {
                             <th>Банк</th>
                             <th>Баланс</th>
                             <th>Коммент.</th>
-                            <th className="col-narrow" />
+                            <th>Действия</th>
                           </tr>
                         </thead>
                         <tbody>
                           {accounts.map((a) => (
                             <tr key={a.id}>
                               <td>
-                                <span className={`status-badge status-${a.status}`}>
-                                  {STATUS_LABELS[a.status]}
-                                </span>
-                                {a.status === "transfer_limits" && a.transfer_limit_until && (
-                                  <div className="admin-status-date">
-                                    лимит до {formatYmdRuCalendarUtc7(a.transfer_limit_until)}
-                                  </div>
-                                )}
-                                {a.status === "cooling" && a.cooling_until && (
-                                  <div className="admin-status-date">
-                                    отлега до {formatYmdRuCalendarUtc7(a.cooling_until)}
-                                  </div>
-                                )}
+                                <div className="admin-acc-cell admin-acc-cell--status">
+                                  <span className={`status-badge status-${a.status}`}>
+                                    {STATUS_LABELS[a.status]}
+                                  </span>
+                                  {a.status === "transfer_limits" && a.transfer_limit_until && (
+                                    <div className="admin-status-date">
+                                      лимит до {formatYmdRuCalendarUtc7(a.transfer_limit_until)}
+                                    </div>
+                                  )}
+                                  {a.status === "cooling" && a.cooling_until && (
+                                    <div className="admin-status-date">
+                                      отлега до {formatYmdRuCalendarUtc7(a.cooling_until)}
+                                    </div>
+                                  )}
+                                </div>
                               </td>
-                              <td>{dash(a.full_name)}</td>
-                              <td className="cell-muted">{dash(a.bank_name)}</td>
-                              <td className="mono admin-accounts-balance">
-                                {formatBalanceArsDash(a.balance)}
+                              <td>
+                                <div className="admin-acc-cell">{dash(a.full_name)}</div>
                               </td>
-                              <td className="cell-comment admin-accounts-comment">{dash(a.comment)}</td>
-                              <td className="col-narrow admin-accounts-actions">
-                                <button
-                                  type="button"
-                                  className="btn btn-ghost btn-sm"
-                                  onClick={() => openAccountEdit(a)}
-                                  disabled={busy}
-                                >
-                                  Изменить
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn btn-danger btn-sm"
-                                  onClick={() => void onDeleteAccount(a.id)}
-                                  disabled={busy}
-                                >
-                                  Удалить
-                                </button>
+                              <td>
+                                <div className="admin-acc-cell cell-muted">{dash(a.bank_name)}</div>
+                              </td>
+                              <td>
+                                <div className="admin-acc-cell mono">{formatBalanceArsDash(a.balance)}</div>
+                              </td>
+                              <td>
+                                <div className="admin-acc-cell cell-comment">
+                                  {dash(a.comment)}
+                                </div>
+                              </td>
+                              <td>
+                                <div className="admin-acc-cell admin-accounts-actions">
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() => openAccountEdit(a)}
+                                    disabled={busy}
+                                  >
+                                    Изменить
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger btn-sm"
+                                    onClick={() => void onDeleteAccount(a.id)}
+                                    disabled={busy}
+                                  >
+                                    Удалить
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -749,6 +818,7 @@ export function AdminPage() {
             )}
           </>
         )}
+        </div>
       </section>
     </main>
 

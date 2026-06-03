@@ -24,6 +24,7 @@ export function LoginPage() {
 
   return (
     <main className="auth-screen">
+      <div className="auth-screen__glow" aria-hidden />
       <section className="auth-panel" aria-labelledby="auth-heading">
         <header className="auth-panel-head">
           <div className="auth-icon-wrap" aria-hidden>

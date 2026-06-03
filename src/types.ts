@@ -12,6 +12,7 @@ export interface UserListItem extends AuthUser {
 
 export type AccountStatus =
   | "working"
+  | "reserve"
   | "transfer_limits"
   | "blocked"
   | "needs_repair"
@@ -63,6 +64,7 @@ export interface Account {
 
 export const STATUS_LABELS: Record<AccountStatus, string> = {
   working: "Рабочий",
+  reserve: "Резерв",
   transfer_limits: "Лимиты на переводы",
   blocked: "Заблокирован",
   needs_repair: "Нужна починка",
@@ -71,8 +73,17 @@ export const STATUS_LABELS: Record<AccountStatus, string> = {
 
 export const STATUS_ORDER: AccountStatus[] = [
   "working",
+  "reserve",
   "transfer_limits",
   "blocked",
   "needs_repair",
   "cooling",
 ];
+
+export function isAccountStatus(s: string): s is AccountStatus {
+  return (STATUS_ORDER as readonly string[]).includes(s);
+}
+
+export function statusLabel(s: string): string {
+  return isAccountStatus(s) ? STATUS_LABELS[s] : s.trim() || "—";
+}

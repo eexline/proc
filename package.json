@@ -4,11 +4,15 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
+    "free-ports": "node scripts/free-ports.mjs",
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "cross-env NODE_ENV=development tsx watch server/index.ts",
+    "check:local": "node scripts/verify-local.mjs",
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
+    "digest:send": "tsx server/scripts/send-digest-now.ts",
+    "seed:accounts": "tsx server/scripts/seed-accounts.ts",
     "preview": "vite preview"
   },
   "engines": {

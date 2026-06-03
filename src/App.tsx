@@ -10,10 +10,16 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="app-shell">
-        <div className="card skeleton-wrap" style={{ marginTop: "2rem" }}>
-          <div className="skeleton" style={{ width: "45%" }} />
-          <div className="skeleton" style={{ width: "100%" }} />
+      <div className="app-shell app-loading">
+        <div className="app-loading-card">
+          <div className="app-loading-logo" aria-hidden>
+            LK
+          </div>
+          <p className="app-loading-text">Загрузка…</p>
+          <div className="skeleton-wrap">
+            <div className="skeleton" style={{ width: "70%" }} />
+            <div className="skeleton" style={{ width: "100%" }} />
+          </div>
         </div>
       </div>
     );
@@ -31,9 +37,12 @@ export default function App() {
           <span className="brand-tag">by El Pollo</span>
         </div>
         <nav className="nav-links">
-          <span className="topbar-user" title={user.login}>
-            {user.login}
-          </span>
+          <div className="topbar-user-wrap" title={user.login}>
+            <span className="topbar-user-badge" aria-hidden>
+              {user.login.charAt(0).toUpperCase()}
+            </span>
+            <span className="topbar-user">{user.login}</span>
+          </div>
           {user.role === "admin" && (
             <>
               <NavLink

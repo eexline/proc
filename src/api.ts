@@ -160,4 +160,11 @@ export const api = {
       body: JSON.stringify(body),
     });
   },
+
+  sendDigest(slot?: "morning" | "evening"): Promise<{ ok: boolean; slot: string }> {
+    return req("/api/admin/send-digest", {
+      method: "POST",
+      body: JSON.stringify(slot ? { slot } : {}),
+    });
+  },
 };

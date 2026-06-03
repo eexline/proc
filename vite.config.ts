@@ -7,11 +7,27 @@ export default defineConfig(({ mode }) => {
   const apiTarget = `http://127.0.0.1:${apiPort}`;
 
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      {
+        name: "log-proxy",
+        configureServer(server) {
+          const host = server.config.server.host;
+          const port = server.config.server.port;
+          console.log(`[vite] http://127.0.0.1:${port}/`);
+          console.log(`[vite] /api -> ${apiTarget}`);
+        },
+      },
+    ],
     server: {
+      host: "127.0.0.1",
       port: 5173,
+      strictPort: true,
       proxy: {
-        "/api": apiTarget,
+        "/api": {
+          target: apiTarget,
+          changeOrigin: true,
+        },
       },
     },
   };
